@@ -1,0 +1,301 @@
+---
+- hosts: nodes
+  remote_user: root
+  gather_facts: false
+  become: yes
+  become_method: sudo
+  
+  vars:
+    java8_repository: "ppa:openjdk-r/ppa"
+    utilities:
+      - git
+      - nginx
+      - openjdk-8-jdk
+      - openjdk-8-jre
+      - npm
+      - maven
+      - ansible
+      - python-pip
+    jenkins_key_url: "https://pkg.jenkins.io/debian/jenkins.io.key"
+    jenkins_repository: "deb http://pkg.jenkins.io/debian-stable binary/"
+    jenkins_cli_jar: "http://localhost:8080/jnlpJars/jenkins-cli.jar" 
+    build_job_checkboxio: "checkboxio"
+    checkboxio_config_xml: "/tmp/checkbox-io-build-config.xml"
+    jenkins_home : /var/lib/jenkins/init.groovy.d
+    itrust_config_xml: "/tmp/itrust-build-config.xml"
+    build_job_itrust: "iTrust"
+    ansible_repository: "ppa:ansible/ansible"
+    aws_secret_key : "{{ lookup('env','AWS_SECRET_KEY')}}"
+    aws_access_key : "{{ lookup('env','AWS_ACCESS_KEY_ID')}}" 
+    mongo_port : "{{ lookup('env','MONGO_PORT')}}"
+    mongo_ip : "{{ lookup('env','MONGO_IP')}}" 
+    mongo_user : "{{ lookup('env','MONGO_USER')}}"
+    mongo_password : "{{ lookup('env','MONGO_PASSWORD')}}" 
+    mail_user : "{{ lookup('env','MAIL_USER')}}"
+    mail_password : "{{ lookup('env','MAIL_PASSWORD')}}" 
+    mail_smtp : "{{ lookup('env','MAIL_SMTP')}}" 
+   
+  vars_prompt:
+    - name: github_username
+      prompt: "Enter your NCSU github username"
+      private: no
+    - name: github_password
+      prompt: "Enter your NCSU github password"
+      private: yes
+      confirm: yes
+      
+
+
+  tasks:
+    - name: install python 2
+      raw: test -e /usr/bin/python || (sudo apt -y update && sudo apt install -y python-minimal)
+      
+    - name: gather_facts
+      setup:
+      
+    - name: Add Java8 repository
+      apt_repository: repo={{ java8_repository }} state=present
+
+    - name: Add Ansible repository
+      apt_repository: repo={{ ansible_repository }} state=present      
+    
+    - name: Install all basic utilities- git,java etc
+      apt: pkg="{{ item }}" state=present update_cache=yes
+      with_items: "{{ utilities }}"
+      
+    - name: Add the key for Jenkins
+      apt_key: url={{ jenkins_key_url }} state=present
+      
+    - name: Add Jenkins to /etc/apt/sources.list
+      apt_repository: repo={{ jenkins_repository }} state=present
+      
+    - name: Install jenkins
+      apt: pkg="jenkins" state=present update_cache=yes
+
+    - name : Wait for jenkins service to be up
+      wait_for:
+       port: 8080
+       delay: 45   
+  
+    - name: Turn off Jenkins setup wizard
+      lineinfile: dest=/etc/default/jenkins regexp='^JAVA_ARGS=' line='JAVA_ARGS="-Djava.awt.headless=true -Djenkins.install.runSetupWizard=false"'
+
+    - name : Disable security
+      replace: 
+        dest: /var/lib/jenkins/config.xml
+        regexp: " <useSecurity>true</useSecurity>"
+        replace: " <useSecurity>false</useSecurity>"
+
+    - name : Restart Jenkins service
+      service: 
+       name: jenkins
+       state: restarted  
+       
+    - name : Wait for jenkins service to be up
+      wait_for:
+       port: 8080
+       delay: 45        
+
+
+    - name: Add jenkins user to sudoer
+      user: name=jenkins group=sudo groups="jenkins" state=present
+      
+    - name: Add line to /etc/sudoers
+      lineinfile:
+        dest: "/etc/sudoers"
+        insertafter: EOF
+        line: "jenkins ALL= NOPASSWD: ALL"
+        state: present
+     
+    - name: Download Jenkins Cli Jar
+      get_url: 
+       url: "{{ jenkins_cli_jar }}"
+       dest: /tmp
+       
+    - name: Install Jenkins plugins for Maven and Git 
+      command: java -jar /tmp/jenkins-cli.jar -s http://localhost:8080/ install-plugin {{ item }}
+      with_items:
+       - maven-plugin
+       - github
+       - postbuild-task
+       - aws-credentials
+       
+    - name : Restart Jenkins service
+      service: 
+       name: jenkins
+       state: restarted    
+       
+    - name : Wait for jenkins service to be up
+      wait_for:
+       port: 8080
+       delay: 45
+
+    - name: Create directory for groovy file
+      file: 
+       path: "{{ jenkins_home }}"
+       state: directory
+       owner: jenkins
+       group: jenkins
+       mode: 0775
+       
+    - name: Copy groovy file 
+      copy:
+       src: "/home/ubuntu/Milestone3/Deployment/create-credentials.groovy"
+       dest: "{{ jenkins_home }}/create-credentials.groovy"
+       owner: jenkins
+       group: jenkins
+       mode: 0664
+       
+    - name: Add github credentials to create-credentials.groovy file
+      lineinfile:
+        dest: "{{ jenkins_home }}/create-credentials.groovy"
+        insertafter: EOF
+        line: "addPassword('{{ github_username }}', '{{ github_password }}')"
+        state: present
+
+    - name: Copy groovy file 
+      copy:
+       src: "/home/ubuntu/Milestone3/Deployment/cred-aws.groovy"
+       dest: "{{ jenkins_home }}/cred-aws.groovy"
+       owner: jenkins
+       group: jenkins
+       mode: 0664
+       
+    - name: Add AWS credentials to cred-aws.groovy
+      lineinfile:
+        dest: "{{ jenkins_home }}/cred-aws.groovy"
+        insertafter: EOF
+        line: "addAWS('{{ aws_access_key }}', '{{ aws_secret_key }}')"
+        state: present
+
+    - name: Copy groovy file 
+      copy:
+       src: "/home/ubuntu/Milestone3/Deployment/create_env_variables.groovy"
+       dest: "{{ jenkins_home }}/create_env_variables.groovy"
+       owner: jenkins
+       group: jenkins
+       mode: 0664 
+
+    - name: Add env vars to create_env_variables.groovy
+      lineinfile:
+        dest: "{{ jenkins_home }}/create_env_variables.groovy"
+        insertbefore: "instance.save()"
+        line: "envVars.put(\"MONGO_PORT\", '{{ mongo_port }}')"
+        state: present       
+
+    - name: Add env vars to create_env_variables.groovy
+      lineinfile:
+        dest: "{{ jenkins_home }}/create_env_variables.groovy"
+        insertbefore: "instance.save()"
+        line: "envVars.put(\"MONGO_IP\", '{{ mongo_ip }}')"
+        state: present       
+
+    - name: Add env vars to create_env_variables.groovy
+      lineinfile:
+        dest: "{{ jenkins_home }}/create_env_variables.groovy"
+        insertbefore: "instance.save()"
+        line: "envVars.put(\"MONGO_USER\", '{{ mongo_user }}')"
+        state: present       
+
+    - name: Add env vars to create_env_variables.groovy
+      lineinfile:
+        dest: "{{ jenkins_home }}/create_env_variables.groovy"
+        insertbefore: "instance.save()"
+        line: "envVars.put(\"MONGO_PASSWORD\", '{{ mongo_password }}')"
+        state: present       
+
+    - name: Add env vars to create_env_variables.groovy
+      lineinfile:
+        dest: "{{ jenkins_home }}/create_env_variables.groovy"
+        insertbefore: "instance.save()"
+        line: "envVars.put(\"MAIL_USER\", '{{ mail_user }}')"
+        state: present       
+
+    - name: Add env vars to create_env_variables.groovy
+      lineinfile:
+        dest: "{{ jenkins_home }}/create_env_variables.groovy"
+        insertbefore: "instance.save()"
+        line: "envVars.put(\"MAIL_PASSWORD\", '{{ mail_password }}')"
+        state: present       
+
+    - name: Add env vars to create_env_variables.groovy
+      lineinfile:
+        dest: "{{ jenkins_home }}/create_env_variables.groovy"
+        insertbefore: "instance.save()"
+        line: "envVars.put(\"MAIL_SMTP\", '{{ mail_smtp }}')"
+        state: present       
+
+
+        
+    - name : Restart Jenkins service
+      service: 
+       name: jenkins
+       state: restarted  
+       
+    - name : Wait for jenkins service to be up
+      wait_for:
+       port: 8080
+       delay: 45        
+
+    - name: Install boto and boto3
+      pip:
+        name: "{{ item }}"
+      with_items:
+        - boto
+        - boto3
+        
+    - name: Disable strict host key checking
+      lineinfile: dest=/etc/ssh/ssh_config line='    StrictHostKeyChecking no' insertafter=EOF state=present
+
+    - name: Copy checkboxio_aws.yml
+      copy:
+        src: "/home/ubuntu/Milestone3/Deployment/checkboxio_aws.yml"
+        dest: "/tmp/checkboxio_aws.yml"
+        mode: 0664
+
+    - name: Copy itrust_aws.yml
+      copy:
+       src: "/home/ubuntu/Milestone3/Deployment/itrust_aws.yml"
+       dest: "/tmp/itrust_aws.yml"
+       mode: 0664 
+
+    - name: Check if Checkbox job exists
+      shell: java -jar /tmp/jenkins-cli.jar -s  http://localhost:8080/ list-jobs
+      register: job_checkboxio
+      changed_when: "job_checkboxio.stdout.find('checkboxio') == -1"
+
+    - name: Copy checkbox.io project config.xml 
+      copy:
+       src: "/home/ubuntu/Milestone3/Deployment/checkbox-io-build-config.xml"
+       dest: "{{ checkboxio_config_xml }}"
+       mode: 0664
+      when: "job_checkboxio.stdout.find('checkboxio') == -1" 
+       
+    - name: Create job for checkbox.io project 
+      shell: java -jar /tmp/jenkins-cli.jar -s http://localhost:8080/ create-job {{ build_job_checkboxio }} < {{ checkboxio_config_xml }}
+      when: "job_checkboxio.stdout.find('checkboxio') == -1" 
+      
+    # - name: Build newly created job for checkbox.io project 
+    #   command: java -jar /tmp/jenkins-cli.jar -s http://localhost:8080/ build {{ build_job_checkboxio }}  
+    #   when: "job_checkboxio.stdout.find('checkboxio') == -1"
+
+    - name: Check if iTrust job exists
+      shell: java -jar /tmp/jenkins-cli.jar -s  http://localhost:8080/ list-jobs
+      register: job_itrust
+      changed_when: "job_itrust.stdout.find('iTrust') == -1"     
+       
+    - name: Copy iTrust project config.xml 
+      copy:
+       src: "/home/ubuntu/Milestone3/Deployment/itrust-build-config.xml"
+       dest: "{{ itrust_config_xml }}"
+       mode: 0664
+      when: "job_itrust.stdout.find('iTrust') == -1"   
+       
+    - name: Create job for checkbox.io project 
+      shell: java -jar /tmp/jenkins-cli.jar -s http://localhost:8080/ create-job {{ build_job_itrust }} < {{ itrust_config_xml }}
+      when: "job_itrust.stdout.find('iTrust') == -1"   
+      
+#    - name: Build newly created job for iTrust project 
+#      command: java -jar /tmp/jenkins-cli.jar -s http://localhost:8080/ build {{ build_job_itrust }}
+#      when: "job_itrust.stdout.find('iTrust') == -1"  
+

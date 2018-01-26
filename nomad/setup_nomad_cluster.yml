@@ -1,0 +1,208 @@
+---
+- hosts: machine1:machine2:machine3
+  name: Bootstrap cluster with python
+  become: yes
+  gather_facts: no
+  tasks:
+  - name: Install python
+    raw: test -e /usr/bin/python || (sudo apt -y update && sudo apt install -y python-minimal)
+
+- hosts: machine1:machine2:machine3
+  name: Install nomad on cluster
+  become: yes
+
+  pre_tasks:
+
+  - name: Disable Firewall
+    service: name=ufw state=stopped
+
+  - name: Install HTTPS Apt Packages
+    apt: name={{ item }} update_cache=yes
+    with_items:
+    - apt-transport-https
+    - ca-certificates
+    - curl
+    - software-properties-common
+
+  roles:
+    - role: brianshumate.nomad
+      nomad_bind_address: 0.0.0.0
+
+- hosts: machine2:machine3
+  name: Enable raw_exec driver on nomad client machines
+  become: yes
+
+  tasks:
+
+  - name: copy client file
+    copy:  
+      src: "templates/client.hcl"
+      dest: "/etc/nomad.d/client.hcl"
+
+  - name: restart nomad
+    service: name=nomad state=restarted
+
+- hosts: machine1:machine2:machine3
+  name: Setup mongodb
+  remote_user: ubuntu
+  gather_facts: yes
+  become: yes
+  become_method: sudo
+  
+  vars:
+     mongo_user : "{{ lookup('env','MONGO_USER')}}"
+     mongo_password : "{{ lookup('env','MONGO_PASSWORD')}}" 
+     
+  tasks:
+    - name: Installing Utilities
+      apt: pkg={{ item }} state=present 
+      with_items:
+       - python-setuptools
+       - python-pip
+   
+    - name: Add Mongo packages repo
+      apt_key: id=EA312927  keyserver=keyserver.ubuntu.com
+   
+    - name: Add Mongo packages repo
+      apt_key: id=EA312927  keyserver=keyserver.ubuntu.com
+      
+    - name: add repo itself
+      apt_repository: repo='deb http://repo.mongodb.org/apt/ubuntu xenial/mongodb-org/3.2 multiverse' state=present
+      
+    - name: install mongodb
+      apt: pkg=mongodb-org state=present force=yes #update_cache=yes
+
+    - name: Install latest pymongo package
+      pip: name=pymongo state=latest use_mirrors=no
+
+    - name : Start mongodb
+      service: 
+       name: mongod
+       state: started
+
+    #wait for localhost
+    #Configure mongo
+    - name: Add MongoDB user
+      mongodb_user:
+        database: admin
+        name: "{{ mongo_user }}"
+        password: "{{ mongo_password }}"
+        roles: readWrite,dbAdmin,userAdmin
+        state: present
+
+    - name: Enable secure authentication for MongoDB
+      blockinfile:
+        dest: "/etc/mongod.conf"
+        content:
+          "security:\n  authorization: disabled"
+
+    - name: Restart mongodb
+      service: name=mongod state=restarted
+
+- hosts: machine1:machine2:machine3
+  name: setup checkboxio on cluster
+  remote_user: ubuntu
+  gather_facts: yes
+  become: yes
+  become_method: sudo
+  
+  vars:
+     default_start_page: "root /home/ubuntu/checkbox.io/public_html/;"
+     
+  tasks:
+   
+    - name: Installing Utilities
+      apt: pkg={{ item }} state=present 
+      with_items:
+       - python-setuptools
+       - python-pip
+       - npm
+       - nodejs
+               
+    - name: Symlink to Node js
+      file: 
+       src: /usr/bin/nodejs
+       dest: /usr/bin/node
+       state: link
+
+    - name: Installing nginx
+      apt: pkg=nginx state=installed 
+
+    - name: 
+      file: path=checkbox.io state=directory
+       
+    - name: Clone checkbox repository
+      git: >
+        repo=https://github.com/chrisparnin/checkbox.io.git
+        dest=checkbox.io
+        accept_hostkey=yes
+        
+    - name: Installing Dotenv
+      npm: name=dotenv global=yes   
+  
+    - name: edit nginx
+      lineinfile: 
+        path: "checkbox.io/local-conf/default"
+        regexp: '^  root '
+        line: "  {{default_start_page}} " 
+        state: present
+    
+    - name: update nginx.conf
+      copy:  
+        src: "checkbox.io/local-conf/nginx.conf"
+        dest: "/etc/nginx/nginx.conf"
+        remote_src: yes
+
+    - name: Update default conf file
+      copy:
+        src: "checkbox.io/local-conf/default"
+        dest: "/etc/nginx/sites-available/default"
+        remote_src: yes
+
+    - name: Restart nginx
+      service: name=nginx state=restarted
+
+    # Install dependencies for node and start server
+    - name: "Install forever to start Nodejs"
+      npm: name=forever global=yes state=present
+
+    - name: "Install nodejs dependencies"
+      npm:
+        path: "checkbox.io/server-side/site"
+
+    - name: "Display of list of nodejs apps running"
+      command: forever list
+      register: forever_list
+      changed_when: false
+  
+- hosts: machine1:machine2:machine3
+  name: Copy scripts for job
+  become: yes
+
+  vars:
+     mail_password : "{{ lookup('env','MAIL_PASSWORD')}}"
+     mongo_password : "{{ lookup('env','MONGO_PASSWORD')}}" 
+  tasks:
+
+  - name: Copy Job File
+    become: no
+    copy: src=templates/job.nomad dest=/home/{{ ansible_user }}/job.nomad
+
+  - name: Copy runnode script
+    become: yes
+    copy: src=templates/runnode dest=/home/{{ ansible_user }}/runnode
+    mode: 777
+
+  - name: Add mongo password in runnode script
+    lineinfile:
+      dest: /home/{{ ansible_user }}/runnode
+      insertafter: "^export MONGO_USER=mongoAdmin"
+      line: "export MONGO_PASSWORD={{ mongo_password }}"
+      state: present
+
+  - name: Add mail password in runnode script
+    lineinfile:
+      dest: /home/{{ ansible_user }}/runnode
+      insertafter: "^export MONGO_USER=mongoAdmin"
+      line: "export MAIL_PASSWORD={{ mail_password }}"
+      state: present

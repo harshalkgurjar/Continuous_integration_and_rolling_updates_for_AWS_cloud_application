@@ -1,0 +1,39 @@
+---
+- hosts: master
+  remote_user: ubuntu
+  gather_facts: yes
+  become: yes
+  become_method: sudo
+
+  tasks:
+  - name: Copy stable File
+    copy: src=/var/lib/jenkins/stable dest=/home/ubuntu/stable
+
+  - name: Copy canary file
+    copy: src=/var/lib/jenkins/canary dest=/home/ubuntu/canary
+
+  - name: Create directory for polling balancer code 
+    file: path=/home/ubuntu/pollingbalancer state=directory
+
+  - name: Copy polling balancer code
+    copy: src=/var/lib/jenkins/Milestone3/Milestone3/pipeline/pollingbalancer/pollingBalancer.js dest=/home/ubuntu/pollingbalancer/pollingBalancer.js
+
+  - name: Copy polling balancer code
+    copy: src=/var/lib/jenkins/Milestone3/Milestone3/pipeline/pollingbalancer/package.json dest=/home/ubuntu/pollingbalancer/package.json
+
+  - name: Installing Utilities
+    apt: pkg={{ item }} state=present 
+    with_items:
+     - npm
+     - nodejs
+
+  - name: Symlink to Node js
+    file: 
+      src: /usr/bin/nodejs
+      dest: /usr/bin/node
+      state: link
+
+  - name: Run npm install to install dependencies for polling balancer
+    npm:
+      path: "/home/ubuntu/pollingbalancer"
+

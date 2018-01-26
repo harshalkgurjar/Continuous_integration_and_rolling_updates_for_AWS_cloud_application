@@ -1,0 +1,8 @@
+#!/bin/bash
+export MONGO_USER=mongoAdmin
+export MONGO_PORT=3002
+export MONGO_IP=127.0.0.1
+export MAIL_USER=noreplydevops53@gmail.com
+export MAIL_SMTP=mock
+cd /home/ubuntu/checkbox.io/server-side/site
+node server.js

@@ -1,0 +1,198 @@
+---
+- hosts: servers
+  name: configuration play
+  user: ubuntu
+  gather_facts: false
+
+  tasks:
+  
+    - name: install python 2
+      raw: test -e /usr/bin/python || (sudo apt -y update && sudo apt install -y python-minimal)
+      
+    - name: gather_facts
+      setup:
+
+- hosts: servers
+  gather_facts: yes
+  
+  vars:
+    ansible_user_id: ubuntu
+
+  tasks: 
+    - name: Install required packages
+      become: yes
+      apt:
+        package: "{{ item }}"
+        state: present
+        update_cache: yes
+      with_items:
+        - git
+
+    - name: Creating a code directory
+      become: yes
+      file: 
+        path: /home/{{ ansible_user_id }}/code
+        state: directory
+        recurse: yes
+
+    - name: Add oracle java apt repository key
+      become: yes
+      apt_repository: repo='ppa:webupd8team/java'
+
+    - name: Update all packages to the latest versions
+      become: yes
+      apt:
+        update_cache: yes
+
+    - name: Accept oracle license
+      become: yes
+      debconf: name='oracle-java8-installer' question='shared/accepted-oracle-license-v1-1' value='true' vtype='select'
+      changed_when: false
+
+    - name: Install jdk8
+      become: yes
+      apt: 
+        name: "{{item}}"
+        state: latest
+        update_cache: yes
+        cache_valid_time: 86400
+      with_items:
+        - oracle-java8-installer
+        - ca-certificates
+        - oracle-java8-set-default
+
+    - name: Download tomcat-9
+      become: yes
+      get_url:
+        url: http://archive.apache.org/dist/tomcat/tomcat-9/v9.0.0.M26/bin/apache-tomcat-9.0.0.M26.tar.gz
+        dest: /home/{{ ansible_user_id }}/code
+        mode: 755
+
+    - name: Extract Tomcat
+      become: yes
+      unarchive: src=/home/{{ansible_user_id}}/code/apache-tomcat-9.0.0.M26.tar.gz
+                 dest=/home/{{ ansible_user_id }}/code
+                 copy=no
+    
+    - name: Install MySQL
+      become: yes
+      apt:
+        deb: https://dev.mysql.com/get/mysql-apt-config_0.8.7-1_all.deb
+        update_cache: yes
+
+    - name: Install MySQL server
+      become: yes
+      apt:
+        package: mysql-server
+        state: present
+
+    - name: Start MySQL
+      become: yes
+      service: name=mysql state=started enabled=yes
+
+    - name: Stop MySQL
+      become: yes
+      service: name=mysql state=stopped
+    
+    - name: Creating an Empty Directory for Itrust
+      become: yes
+      file: 
+        path: /home/{{ ansible_user_id }}/code/Empty
+        state: directory
+        recurse: yes
+
+    - name: Change mod
+      become: yes
+      file:
+        path: /home/{{ansible_user_id}}/code/Empty/
+        mode: 0777
+        recurse: yes
+        force: yes
+
+    - name: Clone iTrust repository
+      git: 
+        repo: https://github.com/harshalgala/iTrust-v23
+        dest: /home/{{ansible_user_id}}/code/Empty
+        accept_hostkey: yes
+        force: yes
+
+    - name: Change mod
+      become: yes
+      file:
+        path: /home/{{ansible_user_id}}/code/Empty/iTrust/
+        mode: 0777
+        recurse: yes
+        force: yes
+
+    - name: Install Maven
+      become: yes
+      apt:
+        package: maven
+        state: present
+
+    - name: Maven compile
+      command: mvn compile 
+      args:
+        chdir: /home/{{ansible_user_id}}/code/Empty/iTrust/
+    
+    - name: Restart MySQL
+      become: yes
+      service: name=mysql state=restarted
+
+    - name: Enable MySQL lowercase table names
+      become: yes
+      ini_file: >
+        dest=/etc/mysql/my.cnf
+        section=mysqld
+        option=lower_case_table_names
+        value=1
+        backup=yes
+
+    - name: Changing Access
+      become: yes
+      command: mysql -u root -e "GRANT ALL PRIVILEGES ON *.* TO 'root'@'localhost' IDENTIFIED BY ''; SELECT plugin FROM mysql.user WHERE user='root'; UPDATE mysql.user SET plugin='mysql_native_password' WHERE user='root'; FLUSH PRIVILEGES;"
+
+    - name: Restart MySQL
+      become: yes
+      service: name=mysql state=restarted
+
+    - name: Maven package
+      command: mvn package -DskipTests
+      args:
+        chdir: /home/{{ansible_user_id}}/code/Empty/iTrust/
+
+    - name: Wait for iTrust-23.0.0.war
+      wait_for:
+        path: /home/{{ansible_user_id}}/code/Empty/iTrust/target/iTrust-23.0.0.war
+        state: present
+        delay: 10
+
+    - name: Copying the war file for building tomcat
+      become: yes
+      copy:
+        src: /home/{{ ansible_user_id }}/code/Empty/iTrust/target/iTrust-23.0.0.war
+        dest: /home/{{ ansible_user_id }}/code/apache-tomcat-9.0.0.M26/webapps/iTrust.war
+        mode: 777
+        remote_src: True
+        
+    - name: Change the port 
+      replace: 
+        path: /home/{{ ansible_user_id }}/code/apache-tomcat-9.0.0.M26/conf/server.xml
+        regexp: '8080'
+        replace: '80'
+      become: yes
+        
+    - name: Change mod
+      become: yes
+      become_user: root
+      file:
+        path: /home/{{ ansible_user_id }}/code
+        mode: 0777
+        recurse: yes
+        force: yes
+        state: directory
+
+    - name: start tomcat
+      become: yes
+      become_user: root
+      command: nohup /home/{{ ansible_user_id }}/code/apache-tomcat-9.0.0.M26/bin/startup.sh

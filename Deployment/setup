@@ -1,0 +1,9 @@
+#!/bin/bash
+cd /var/lib/jenkins/Milestone3/Milestone3/asangha
+if [ ! -f /var/lib/jenkins/inventory ]; then
+   ansible-playbook  /var/lib/jenkins/Milestone3/Milestone3/asangha/provision-instances-itrust.yml
+   ansible-playbook -i /var/lib/jenkins/inventory /var/lib/jenkins/Milestone3/Milestone3/asangha/setup_servers.yml
+else
+  ansible-playbook  -i /var/lib/jenkins/inventory /var/lib/jenkins/Milestone3/Milestone3/asangha/rolling_update.yml
+fi
+

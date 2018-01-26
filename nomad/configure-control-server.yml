@@ -1,0 +1,29 @@
+---
+
+- hosts: localhost
+  gather_facts: no
+  tasks:
+
+  - name: Install python
+    raw: test -e /usr/bin/python || (sudo apt -y update && sudo apt install -y python-minimal)
+
+- hosts: localhost
+
+  tasks:
+
+  - name: Install APT Packages
+    become: yes
+    apt: name={{ item }} update_cache=yes
+    with_items:
+    - software-properties-common
+    - zip
+    - unzip
+    - python-pip
+    - python-netaddr
+    - ansible
+
+  - name: Install Cryptography for Vault Performance
+    pip: name=cryptography
+
+  - name: Install Roles
+    command: ansible-galaxy install -r requirements.yml

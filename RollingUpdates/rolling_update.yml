@@ -1,0 +1,50 @@
+---
+
+- hosts: servers
+  gather_facts: yes
+  become: yes
+  serial: 1
+
+  tasks:
+    
+    - debug: msg={{ inventory_hostname }}
+
+    - debug: msg={{ public_ip }}
+ 
+
+#    - name: Perform Rolling Update Remove the server for maintenance in HAProxy
+#      haproxy: 'state=disabled backend=haproxy_backend host="{{ inventory_hostname}}" socket=/var/lib/haproxy/stats'
+#      delegate_to: "{{ item }}" 
+#      with_items: "{{ groups['loadbalancer'] }}"       
+
+    - name: Remove Previous iTrust.war and Source Code
+      file:
+        state: absent
+        path: "/home/ubuntu/code/apache-tomcat-9.0.0.M26/webapps/{{ item }}"
+      with_items:
+       - iTrust.war
+       - iTrust
+  
+    - name: Copy the new iTrust War file to tomcat
+      copy:
+        src:  /var/lib/jenkins/Milestone3/Milestone3/RollingUpdates/iTrust.war
+        dest: /home/ubuntu/code/apache-tomcat-9.0.0.M26/webapps/iTrust.war
+      
+    - name: start tomcat
+      become: yes
+      become_user: root
+      command: nohup /home/ubuntu/code/apache-tomcat-9.0.0.M26/bin/startup.sh 
+      
+    - name: Wait for the updated iTrust-23.0.0.war to be present
+      wait_for:
+        port: 80
+        state: present
+        delay: 60       
+    
+ #   - name: Rolling Update Completed Enable the server back for maintenance in HAProxy
+ #     haproxy: 'state=enabled backend=haproxy_backend host="{{ inventory_hostname }}" socket=/var/lib/haproxy/stats'
+ #     delegate_to: "{{ item }}" 
+ #     with_items: "{{ groups['loadbalancer'] }}"    
+
+
+

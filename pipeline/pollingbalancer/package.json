@@ -1,0 +1,15 @@
+{
+  "name": "pollingBalancer",
+  "version": "0.0.1",
+  "description": "Polls",
+  "main": "pollingBalancer.js",
+  "author": "",
+  "devDependencies": {},
+  "dependencies": {
+    "express": "^4.16.2",
+    "fs": "0.0.1-security",
+    "http-proxy": "^1.16.2",
+    "random-js": "^1.0.8",
+    "request": "^2.83.0"
+  }
+}

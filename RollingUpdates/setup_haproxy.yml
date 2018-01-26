@@ -1,0 +1,56 @@
+# Reference
+# http://blog.toast38coza.me/setup-and-configure-haproxy-with-ansible/
+---
+- hosts: loadbalancer
+  name: loadbalance_conf
+  user: ubuntu
+  gather_facts: false
+
+  tasks:
+  
+    - name: install python 2
+      raw: test -e /usr/bin/python || (sudo apt -y update && sudo apt install -y python-minimal)
+      
+    - name: gather_facts
+      setup:
+
+- hosts: loadbalancer
+  gather_facts: yes
+
+  vars:
+    haproxy_app_name: iTrust
+    haproxy_mode: http
+    haproxy_enable_stats: enable 
+    haproxy_algorithm: roundrobin
+    haproxy_backend_servers:
+      - {name: server1, ip: {{ inventory_hostname }}, port: 80, paramstring: cookie A check}
+      - {name: server2, ip: {{ inventory_hostname }}}, port: 80, paramstring: cookie A check}
+
+  tasks: 
+
+    - debug: msg={{ item }} 
+      with_items: 
+        - "{{ groups['servers'] }}"  
+
+    - name: Install required packages
+      become: yes
+      apt:
+        package: "{{ item }}"
+        state: present
+        update_cache: yes
+      with_items:
+        - haproxy 
+
+    - name: Enable init script
+      replace: dest='/etc/default/haproxy' regexp='ENABLED=0' replace='ENABLED=1'
+    
+    - name: Update HAProxy config
+      template: src=templates/haproxy.cfg dest=/etc/haproxy/haproxy.cfg backup=yes
+      notify: 
+        - restart haproxy
+      become: yes  
+
+  handlers:
+    - name: restart haproxy
+      service: name=haproxy state=restarted
+      become: yes

@@ -1,0 +1,100 @@
+# Run me first, to make sure things have python2
+---
+- hosts: master:stable:canary
+  remote_user: ubuntu
+  gather_facts: yes
+  become: yes
+  become_method: sudo
+
+  vars:
+    redis_repository: "ppa:chris-lea/redis-server"
+    
+  tasks:
+    - name: Add Redis repository
+      apt_repository: repo={{ redis_repository }} state=present
+
+    - name: Install redis-server
+      apt: pkg="redis-server" state=present update_cache=yes
+  
+    - name: Add private IP of each machine as it's redis bind addr
+      replace:
+        path: /etc/redis/redis.conf
+        regexp: "^bind 127.0.0.1$"
+        replace: "bind 127.0.0.1 {{ private_ip }}"
+        backup: yes
+    
+    - name: Allow 6379 communication
+      command: ufw allow 6379
+
+- hosts: master
+  remote_user: ubuntu
+  gather_facts: yes
+  become: yes
+  become_method: sudo
+
+  vars:
+    master_private_ip: "{{ private_ip }}"
+
+  tasks:
+  
+    - name: Make change to tcp-keepalive
+      replace:
+        path: /etc/redis/redis.conf
+        regexp: "^tcp-keepalive$"
+        replace: "tcp-keepalive 60"
+        backup: yes
+
+    - name: add master_private_ip to file
+      lineinfile:
+        dest: /var/lib/jenkins/master_private_ip.txt
+        insertafter: EOF
+        line: "{{ private_ip }}"
+        state: present
+      delegate_to: localhost
+      
+    - name: Restart redis
+      service:
+       name: redis
+       state: restarted  
+
+
+- hosts: stable:canary
+  remote_user: ubuntu
+  gather_facts: yes
+  become: yes
+  become_method: sudo
+
+  tasks:
+  
+    - name: echo master_private_ip
+      command: cat /var/lib/jenkins/master_private_ip.txt
+      register: master_private_ip
+      delegate_to: localhost
+
+    - name: debug
+      debug: msg={{ master_private_ip.stdout }}
+      
+    - name: Make change to indicate slaveof 
+      lineinfile:
+        dest: /etc/redis/redis.conf
+        line: "slaveof {{ master_private_ip.stdout }} 6379"
+        insertafter: EOF
+        backup: yes
+        state: present
+
+    - name: Create redisclient file
+      file:
+        path: /home/ubuntu/redisclient
+        mode: 0644
+        state: touch
+
+    - name: Add line in file
+      lineinfile:
+        path: /home/ubuntu/redisclient
+        insertafter: EOF
+        line: "{{ private_ip }}"
+
+    - name: Restart redis
+      service:
+       name: redis
+       state: restarted  

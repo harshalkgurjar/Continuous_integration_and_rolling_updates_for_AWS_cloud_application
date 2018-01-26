@@ -1,0 +1,144 @@
+---
+- hosts: stable
+  remote_user: ubuntu
+  gather_facts: yes
+  become: yes
+  become_method: sudo
+  
+  vars:
+     default_start_page: "root /home/ubuntu/checkbox.io/public_html/;"
+     mongo_port : "{{ lookup('env','MONGO_PORT')}}"
+     mongo_ip : "{{ lookup('env','MONGO_IP')}}" 
+     mongo_user : "{{ lookup('env','MONGO_USER')}}"
+     mongo_password : "{{ lookup('env','MONGO_PASSWORD')}}" 
+     mail_user : "{{ lookup('env','MAIL_USER')}}"
+     mail_password : "{{ lookup('env','MAIL_PASSWORD')}}" 
+     mail_smtp : "{{ lookup('env','MAIL_SMTP')}}" 
+     
+  tasks:
+   
+    - name: Installing Utilities
+      apt: pkg={{ item }} state=present 
+      with_items:
+       - python-setuptools
+       - python-pip
+       - npm
+       - nodejs
+               
+    - name: Symlink to Node js
+      file: 
+       src: /usr/bin/nodejs
+       dest: /usr/bin/node
+       state: link
+
+    - name: Installing nginx
+      apt: pkg=nginx state=installed 
+
+    - name: 
+      file: path=checkbox.io state=directory
+       
+    - name: Clone checkbox repository
+      git: >
+        repo=https://github.com/payalchheda/checkbox.io.git
+        dest=checkbox.io
+        accept_hostkey=yes
+        
+    - name: Installing Dotenv
+      npm: name=dotenv global=yes
+
+    - name: Set mongo user
+      lineinfile: 
+        path: "/root/.bashrc"
+        insertafter: EOF
+        line: "export MONGO_USER={{ mongo_user }}" 
+        state: present
+
+    - name: Set mongo password
+      lineinfile: 
+        path: "/root/.bashrc"
+        insertafter: EOF
+        line: "export MONGO_PASSWORD={{ mongo_password }}" 
+        state: present
+
+    - name: Set mongo ip
+      lineinfile: 
+        path: "/root/.bashrc"
+        insertafter: EOF
+        line: "export MONGO_IP={{ mongo_ip }}" 
+        state: present
+
+    - name: Set mongo port
+      lineinfile: 
+        path: "/root/.bashrc"
+        insertafter: EOF
+        line: "export MONGO_PORT={{ mongo_port }}" 
+        state: present
+
+    - name: Set MAIL_USER
+      lineinfile: 
+        path: "/root/.bashrc"
+        insertafter: EOF
+        line: "export MAIL_USER={{ mail_user }}" 
+        state: present
+    
+    - name: Set MAIL_PASSWORD
+      lineinfile: 
+        path: "/root/.bashrc"
+        insertafter: EOF
+        line: "export MAIL_PASSWORD={{ mail_password }}" 
+        state: present
+
+    - name: Set MAIL_SMTP
+      lineinfile: 
+        path: "/root/.bashrc"
+        insertafter: EOF
+        line: "export MAIL_SMTP={{ mail_smtp }}" 
+        state: present
+        
+    # - name: edit nginx
+      # lineinfile: 
+        # dest: "checkbox.io/local-conf/nginx.conf"
+        # regexp: '^       server '
+        # line: "       server {{my_ip}}" 
+        # state: present    
+  
+    - name: edit nginx
+      lineinfile: 
+        path: "checkbox.io/local-conf/default"
+        regexp: '^  root '
+        line: "  {{default_start_page}} " 
+        state: present
+    
+    - name: update nginx.conf
+      copy:  
+        src: "checkbox.io/local-conf/nginx.conf"
+        dest: "/etc/nginx/nginx.conf"
+        remote_src: yes
+
+    - name: Update default conf file
+      copy:
+        src: "checkbox.io/local-conf/default"
+        dest: "/etc/nginx/sites-available/default"
+        remote_src: yes
+
+    - name: Restart nginx
+      service: name=nginx state=restarted
+
+    # Install dependencies for node and start server
+    - name: "Install forever to start Nodejs"
+      npm: name=forever global=yes state=present
+
+    - name: "Install nodejs dependencies"
+      npm:
+        path: "checkbox.io/server-side/site"
+
+    - name: "Display of list of nodejs apps running"
+      command: forever list
+      register: forever_list
+      changed_when: false
+    
+    - name: "Start sample nodejsapp"
+      command: forever start -o output.log -e error.log server.js
+      args:
+        chdir: checkbox.io/server-side/site/
+      when: "forever_list.stdout.find('checkbox.io/server-side/site/server.js')== -1"

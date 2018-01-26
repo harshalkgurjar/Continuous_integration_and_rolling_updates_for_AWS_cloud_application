@@ -1,0 +1,18 @@
+[machine1]
+nomad1 nomad_node_role=server nomad_iface=enp0s8 consul_node_role=bootstrap consul_iface=enp0s8 consul_client_address=192.168.33.11 ansible_host=192.168.33.11 ansible_user=ubuntu ansible_ssh_private_key_file=private_key_nomad1
+[machine2]
+nomad2 nomad_node_role=client nomad_iface=enp0s8 consul_node_role=client consul_iface=enp0s8 consul_client_address=192.168.33.12 ansible_host=192.168.33.12 ansible_user=ubuntu ansible_ssh_private_key_file=private_key_nomad2
+[machine3]
+nomad3 nomad_node_role=client nomad_iface=enp0s8 consul_node_role=client consul_iface=enp0s8 consul_client_address=192.168.33.13 ansible_host=192.168.33.13 ansible_user=ubuntu ansible_ssh_private_key_file=private_key_nomad3
+
+[nomad_instances]
+[nomad_instances:children]
+machine1
+machine2
+machine3
+
+[consul_instances]
+[consul_instances:children]
+machine1
+machine2
+machine3
