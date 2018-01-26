@@ -1,0 +1,2 @@
+# Continuous_integration_and_rolling_updates_for_AWS_cloud_application
+Configured Jenkins server jobs for provisioning AWS Instance &amp; deploying Node.js web application- checkbox.io &amp; software enterprise Java system iTrust, automatically using Ansible script. Created a git hook on Jenkins server that will trigger a deployment job when doing a git push to production server. Implemented rolling update strategy using Ansible where each instance is reployed while others remain operational.
